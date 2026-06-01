@@ -1328,6 +1328,16 @@ class WorkflowEngineService {
           const tokenParam = platform === 'openai'
             ? { max_completion_tokens: maxTokens }
             : { max_tokens: maxTokens };
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${cfg.apiKey}`,
+          };
+
+          // Support corporate OpenAI-compatible routers that prefer x-api-key
+          if (platform === 'openai-compatible') {
+            headers['x-api-key'] = cfg.apiKey;
+          }
+
           const res = await axios.post(
             apiUrl,
             {
@@ -1337,10 +1347,7 @@ class WorkflowEngineService {
               temperature,
             },
             {
-              headers: {
-                Authorization: `Bearer ${cfg.apiKey}`,
-                'Content-Type': 'application/json',
-              },
+              headers,
               timeout: 60000,
             }
           );
@@ -1423,14 +1430,20 @@ class WorkflowEngineService {
           const tokenParam = platform === 'openai'
             ? { max_completion_tokens: 30 }
             : { max_tokens: 30 };
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${cfg.apiKey}`,
+          };
+
+          if (platform === 'openai-compatible') {
+            headers['x-api-key'] = cfg.apiKey;
+          }
+
           const res = await axios.post(
             apiUrl,
             { model, messages: classifyMessages, ...tokenParam, temperature: 0 },
             {
-              headers: {
-                Authorization: `Bearer ${cfg.apiKey}`,
-                'Content-Type': 'application/json',
-              },
+              headers,
               timeout: 15000,
             }
           );

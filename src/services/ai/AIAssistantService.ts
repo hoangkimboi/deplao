@@ -439,14 +439,22 @@ VÍ DỤ ĐẦU RA SAI (KHÔNG bao giờ làm):
         const requestBody = { model: assistant.model, messages, ...tokenParam, temperature };
         Logger.info(`[AIAssistant] Sending request to ${apiUrl}, messages.length=${messages.length}`);
         const startTime = Date.now();
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${assistant.apiKey}`,
+        };
+
+        // Many custom OpenAI-compatible routers (especially corporate proxies)
+        // require the key in x-api-key header instead of or in addition to Bearer
+        if (assistant.platform === 'openai-compatible') {
+          headers['x-api-key'] = assistant.apiKey;
+        }
+
         const res = await axios.post(
           apiUrl,
           requestBody,
           {
-            headers: {
-              Authorization: `Bearer ${assistant.apiKey}`,
-              'Content-Type': 'application/json',
-            },
+            headers,
             timeout: 30000,
           }
         );
@@ -461,12 +469,20 @@ VÍ DỤ ĐẦU RA SAI (KHÔNG bao giờ làm):
         totalTokens = res.data.usage?.total_tokens || (promptTokens + completionTokens);
       }
     } catch (err: any) {
-      // Enhanced error logging
       const status = err.response?.status;
       const errData = err.response?.data;
-      const errMsg = errData?.error?.message || errData?.error || errData?.message || err.message;
-      Logger.error(`[AIAssistant] callLLM FAILED → status=${status}, platform=${assistant.platform}, model=${assistant.model}, error=${JSON.stringify(errMsg)}, fullResponse=${JSON.stringify(errData)?.substring(0, 1000)}`);
-      throw err;
+      const providerError = errData?.error?.message || errData?.error || errData?.message || err.message;
+
+      Logger.error(`[AIAssistant] callLLM FAILED → status=${status}, platform=${assistant.platform}, model=${assistant.model}, endpoint=${getOpenAICompatibleUrl(assistant.platform, assistant.customEndpoint)}, error=${JSON.stringify(providerError)}, fullResponse=${JSON.stringify(errData)?.substring(0, 1500)}`);
+
+      // Throw a clear, actionable error instead of generic axios message
+      const friendlyMessage = status
+        ? `AI request failed (${status}): ${providerError}`
+        : `AI request failed: ${providerError}`;
+
+      const newErr = new Error(friendlyMessage);
+      (newErr as any).originalError = err;
+      throw newErr;
     }
 
     // Log usage to DB
