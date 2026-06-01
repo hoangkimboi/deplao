@@ -18,6 +18,7 @@ const PLATFORMS = [
   { value: 'deepseek', label: 'DeepSeek',        icon: '🔮', color: 'bg-purple-600' },
   { value: 'grok',     label: 'Grok (xAI)',      icon: '⚡', color: 'bg-orange-600' },
   { value: 'mistral',  label: 'Mistral AI',      icon: '🌀', color: 'bg-sky-600' },
+  { value: 'openai-compatible', label: 'OpenAI Compatible', icon: '🔌', color: 'bg-indigo-600' },
 ] as const;
 
 const MODELS_BY_PLATFORM: Record<string, { value: string; label: string }[]> = {
@@ -189,6 +190,7 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [model, setModel] = useState('gpt-5.4-mini');
+  const [customEndpoint, setCustomEndpoint] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [posIntegrationId, setPosIntegrationId] = useState('');
   const [maxTokens, setMaxTokens] = useState(1000);
@@ -270,6 +272,7 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
           setPlatform(a.platform || 'openai');
           setApiKey(a.apiKey || '');
           setModel(a.model || 'gpt-5.4-mini');
+          setCustomEndpoint(a.customEndpoint || '');
           setSystemPrompt(a.systemPrompt || '');
           setPosIntegrationId(a.posIntegrationId || '');
           try { setPinnedProducts(JSON.parse(a.pinnedProductsJson || '[]')); } catch { setPinnedProducts([]); }
@@ -296,6 +299,8 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
     const models = MODELS_BY_PLATFORM[platform];
     if (models?.length && !models.find(m => m.value === model)) {
       setModel(models[0].value);
+    } else if (platform === 'openai-compatible' && !model) {
+      setModel(''); // Clear model for custom input
     }
   }, [platform]);
 
@@ -319,6 +324,7 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
         platform,
         apiKey: apiKey || '***',
         model,
+        customEndpoint: platform === 'openai-compatible' ? customEndpoint.trim() : undefined,
         systemPrompt: systemPrompt.trim(),
         posIntegrationId: posIntegrationId || null,
         pinnedProductsJson: JSON.stringify(pinnedProducts),
@@ -622,12 +628,22 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
                 </div>
                 <div>
                   <label className="block text-xs text-gray-400 mb-1">Model</label>
-                  <select value={model} onChange={e => setModel(e.target.value)}
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
-                    {currentModels.map(m => (
-                      <option key={m.value} value={m.value}>{m.label}</option>
-                    ))}
-                  </select>
+                  {platform === 'openai-compatible' ? (
+                    <input
+                      type="text"
+                      value={model}
+                      onChange={e => setModel(e.target.value)}
+                      placeholder="Nhập tên model (VD: gpt-4, claude-3-sonnet-20240229, ...)"
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                    />
+                  ) : (
+                    <select value={model} onChange={e => setModel(e.target.value)}
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+                      {currentModels.map(m => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               </div>
             </div>
@@ -655,9 +671,32 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
                 {platform === 'deepseek' && 'Lấy tại: platform.deepseek.com/api-keys'}
                 {platform === 'grok' && 'Lấy tại: console.x.ai'}
                 {platform === 'mistral' && 'Lấy tại: console.mistral.ai/api-keys'}
+                {platform === 'openai-compatible' && 'API Key từ nhà cung cấp của bạn'}
               </p>
             </div>
           </div>
+
+          {/* Custom Endpoint - Only show for openai-compatible */}
+          {platform === 'openai-compatible' && (
+            <div>
+              <h2 className="text-sm font-semibold text-gray-300 mb-2">🔌 Custom API Endpoint</h2>
+              <div className="bg-gray-800 rounded-xl p-4">
+                <input
+                  type="text"
+                  value={customEndpoint}
+                  onChange={e => setCustomEndpoint(e.target.value)}
+                  placeholder="https://9router.vnptphutho.com/v1"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                />
+                <p className="text-[10px] text-gray-500 mt-1.5">
+                  Nhập base URL của API endpoint (VD: https://9router.vnptphutho.com/v1)
+                </p>
+                <p className="text-[10px] text-yellow-500 mt-1">
+                  ⚠️ Endpoint phải tương thích với OpenAI API format
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* System prompt */}
           <div>

@@ -1462,6 +1462,37 @@ class DatabaseService {
             Logger.warn(`[DatabaseService] Migration channel column: ${err.message}`);
         }
 
+        // ─── Migration: add `custom_endpoint` column for OpenAI-compatible APIs ────
+        try {
+            const aiCols = this.query<any>(`PRAGMA table_info(ai_assistants)`);
+            const hasCustomEndpoint = aiCols.some((c: any) => c.name === 'custom_endpoint');
+            if (!hasCustomEndpoint) {
+                db!.exec(`ALTER TABLE ai_assistants ADD COLUMN custom_endpoint TEXT DEFAULT NULL`);
+                this.save();
+                Logger.log('[DatabaseService] ✅ Migration: added custom_endpoint column to ai_assistants');
+            }
+        } catch (err: any) {
+            Logger.warn(`[DatabaseService] Migration custom_endpoint column: ${err.message}`);
+        }
+
+        // ─── Migration: fix invalid max_tokens values (>16000 or <50) ──────────
+        try {
+            const badAssistants = this.query<any>(
+                `SELECT id, name, max_tokens FROM ai_assistants WHERE max_tokens > 16000 OR max_tokens < 50`
+            );
+            if (badAssistants.length > 0) {
+                Logger.warn(`[DatabaseService] 🔧 Found ${badAssistants.length} assistants with invalid max_tokens, fixing...`);
+                badAssistants.forEach((a: any) => {
+                    Logger.warn(`  - ${a.name}: ${a.max_tokens} → 1000`);
+                });
+                db!.exec(`UPDATE ai_assistants SET max_tokens = 1000 WHERE max_tokens > 16000 OR max_tokens < 50`);
+                this.save();
+                Logger.log('[DatabaseService] ✅ Migration: fixed invalid max_tokens to 1000');
+            }
+        } catch (err: any) {
+            Logger.warn(`[DatabaseService] Migration max_tokens fix: ${err.message}`);
+        }
+
         // ─── Migration: copy fb_* data → unified tables (Phase B3) ─────────────
         try {
             const hasFbTable = this.query<any>(`SELECT name FROM sqlite_master WHERE type='table' AND name='fb_accounts'`);

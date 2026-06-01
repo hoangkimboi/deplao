@@ -15,6 +15,7 @@ const PLATFORM_META: Record<string, { label: string; color: string; icon: string
   deepseek: { label: 'DeepSeek', color: 'bg-purple-600',  icon: '🔮' },
   grok:     { label: 'Grok',     color: 'bg-orange-600',  icon: '⚡' },
   mistral:  { label: 'Mistral',  color: 'bg-sky-600',     icon: '🌀' },
+  'openai-compatible': { label: 'OpenAI Compatible', color: 'bg-indigo-600', icon: '🔌' },
 };
 
 interface AIAssistantSummary {

@@ -15,7 +15,7 @@ import Logger from '../../utils/Logger';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type AIPlatform = 'openai' | 'gemini' | 'claude' | 'deepseek' | 'grok' | 'mistral';
+export type AIPlatform = 'openai' | 'gemini' | 'claude' | 'deepseek' | 'grok' | 'mistral' | 'openai-compatible';
 
 export interface AIAssistant {
   id: string;
@@ -33,6 +33,7 @@ export interface AIAssistant {
   isDefault: boolean;
   createdAt: number;
   updatedAt: number;
+  customEndpoint?: string;  // Custom API endpoint for openai-compatible platform
 }
 
 export interface AIAssistantFile {
@@ -75,7 +76,19 @@ function decryptApiKey(raw: string): string {
 
 // ─── Platform URL helpers ─────────────────────────────────────────────────────
 
-function getOpenAICompatibleUrl(platform: string): string {
+function getOpenAICompatibleUrl(platform: string, customEndpoint?: string): string {
+  if (platform === 'openai-compatible' && customEndpoint) {
+    // Ensure endpoint ends with /chat/completions
+    if (customEndpoint.endsWith('/chat/completions')) {
+      return customEndpoint;
+    } else if (customEndpoint.endsWith('/v1')) {
+      return `${customEndpoint}/chat/completions`;
+    } else if (customEndpoint.endsWith('/')) {
+      return `${customEndpoint}v1/chat/completions`;
+    } else {
+      return `${customEndpoint}/v1/chat/completions`;
+    }
+  }
   switch (platform) {
     case 'deepseek': return 'https://api.deepseek.com/v1/chat/completions';
     case 'grok':     return 'https://api.x.ai/v1/chat/completions';
@@ -151,6 +164,14 @@ class AIAssistantService {
     // so the SQL CASE can detect it and preserve the existing key.
     const encrypted = data.apiKey === '***' ? '***' : encryptApiKey(data.apiKey);
 
+    // ── Validate & clamp maxTokens (50-16000) ──────────────────────────────
+    let safeMaxTokens = data.maxTokens || 1000;
+    if (!Number.isFinite(safeMaxTokens) || safeMaxTokens < 50 || safeMaxTokens > 16000) {
+      Logger.warn(`[AIAssistant] saveAssistant: invalid maxTokens=${safeMaxTokens}, clamping to 1000`);
+      safeMaxTokens = 1000;
+    }
+    safeMaxTokens = Math.floor(safeMaxTokens);
+
     const pinnedJson = data.pinnedProductsJson || '[]';
     Logger.info(`[AIAssistant] saveAssistant id=${id}, posIntegrationId=${data.posIntegrationId || 'null'}, pinnedProductsJson.length=${pinnedJson.length}, pinnedPreview=${pinnedJson.substring(0, 200)}`);
 
@@ -159,8 +180,8 @@ class AIAssistantService {
       db.run(`UPDATE ai_assistants SET is_default = 0`);
     }
 
-    db.run(`INSERT INTO ai_assistants (id, name, platform, api_key_encrypted, model, system_prompt, pos_integration_id, pinned_products_json, max_tokens, temperature, context_message_count, enabled, is_default, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    db.run(`INSERT INTO ai_assistants (id, name, platform, api_key_encrypted, model, system_prompt, pos_integration_id, pinned_products_json, max_tokens, temperature, context_message_count, enabled, is_default, custom_endpoint, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
               name = excluded.name, platform = excluded.platform,
               api_key_encrypted = CASE WHEN excluded.api_key_encrypted = '***' THEN ai_assistants.api_key_encrypted ELSE excluded.api_key_encrypted END,
@@ -170,14 +191,16 @@ class AIAssistantService {
               max_tokens = excluded.max_tokens, temperature = excluded.temperature,
               context_message_count = excluded.context_message_count,
               enabled = excluded.enabled, is_default = excluded.is_default,
+              custom_endpoint = excluded.custom_endpoint,
               updated_at = excluded.updated_at`,
       [
         id, data.name, data.platform, encrypted, data.model,
         data.systemPrompt || '', data.posIntegrationId || null,
         pinnedJson,
-        data.maxTokens || 1000, data.temperature ?? 0.7,
+        safeMaxTokens, data.temperature ?? 0.7,
         data.contextMessageCount || 30,
         data.enabled !== false ? 1 : 0, data.isDefault ? 1 : 0,
+        data.customEndpoint || null,
         data.id ? now : now, now,
       ]);
 
@@ -300,23 +323,36 @@ class AIAssistantService {
 
 1. PHONG CÁCH: Trả lời tự nhiên như người thật đang chat. Ngắn gọn, thân thiện, KHÔNG dùng markdown, KHÔNG dùng bullet/numbering, KHÔNG dùng emoji quá nhiều.
 
-2. CHIA CÂU: Mỗi ý tách riêng thành 1 câu ngắn gọn (mỗi câu là 1 tin nhắn chat riêng). KHÔNG dồn hết mọi thứ vào 1 đoạn dài. Tưởng tượng bạn đang nhắn tin trên điện thoại — mỗi lần gửi 1-2 câu ngắn.
+2. SỐ LƯỢNG TIN NHẮN: BẮT BUỘC chỉ trả về TỐI ĐA 1-2 tin nhắn text (ưu tiên 1 tin). KHÔNG được tách thành 3, 4, 5 tin nhắn vì sẽ gây spam và phiền khách hàng. Hãy gộp các ý liên quan vào cùng 1 tin nhắn (có thể dùng xuống dòng \\n trong nội dung). Chỉ tách thành 2 tin khi thực sự cần thiết (VD: 1 tin chào + 1 tin trả lời câu hỏi).
 
-3. HÌNH ẢNH: Nếu trong dữ liệu kiến thức/sản phẩm có link ảnh (URL bắt đầu bằng http:// hoặc https:// và kết thúc bằng .jpg, .jpeg, .png, .gif, .webp hoặc chứa /image), hãy trả về dạng image. Chỉ gửi ảnh khi thực sự liên quan đến câu hỏi.
+3. ĐỘ DÀI: Mỗi tin nhắn nên có 1-3 câu là vừa đủ. KHÔNG quá dài. KHÔNG quá nhiều câu rời rạc.
 
-4. ĐỊNH DẠNG ĐẦU RA: BẮT BUỘC trả về JSON array, KHÔNG trả về text thuần. Mỗi phần tử có dạng:
+4. HÌNH ẢNH: Nếu trong dữ liệu kiến thức/sản phẩm có link ảnh (URL bắt đầu bằng http:// hoặc https:// và kết thúc bằng .jpg, .jpeg, .png, .gif, .webp hoặc chứa /image), hãy trả về dạng image. Chỉ gửi ảnh khi thực sự liên quan đến câu hỏi.
+
+5. ĐỊNH DẠNG ĐẦU RA: BẮT BUỘC trả về JSON array, KHÔNG trả về text thuần. Mỗi phần tử có dạng:
    - Tin nhắn text: {"type": "text", "content": "Nội dung tin nhắn"}
    - Hình ảnh: {"type": "image", "content": ["url_ảnh_1", "url_ảnh_2"]}
 
-VÍ DỤ ĐẦU RA ĐÚNG:
+VÍ DỤ ĐẦU RA ĐÚNG (1 tin nhắn - chuẩn nhất):
 [
-  {"type": "text", "content": "Chào bạn!"},
-  {"type": "text", "content": "Sản phẩm A giá 240.000đ nha"},
-  {"type": "image", "content": ["https://example.com/product-a.jpg"]},
-  {"type": "text", "content": "Bạn cần tư vấn thêm gì không?"}
+  {"type": "text", "content": "Chào anh/chị! Em là Luma trợ lý AI bên VNPT. Anh/chị đang gặp lỗi dịch vụ nào ạ? Vui lòng mô tả hoặc gửi ảnh để em hỗ trợ nhé."}
 ]
 
-5. KHÔNG BAO GIỜ trả về text thường. LUÔN LUÔN trả về JSON array như trên.`);
+VÍ DỤ ĐẦU RA ĐÚNG (2 tin nhắn - chỉ khi thực sự cần):
+[
+  {"type": "text", "content": "Dạ em hiểu rồi ạ!"},
+  {"type": "text", "content": "Anh/chị vui lòng thử khởi động lại modem rồi báo em kết quả nhé."}
+]
+
+VÍ DỤ ĐẦU RA SAI (KHÔNG bao giờ làm):
+[
+  {"type": "text", "content": "Chào anh/chị!"},
+  {"type": "text", "content": "Em là Luma."},
+  {"type": "text", "content": "Anh/chị cần gì?"},
+  {"type": "text", "content": "Em sẽ hỗ trợ."}
+]
+
+6. KHÔNG BAO GIỜ trả về text thường. LUÔN LUÔN trả về JSON array như trên.`);
     }
 
     return parts.join('\n');
@@ -330,7 +366,14 @@ VÍ DỤ ĐẦU RA ĐÚNG:
     messages: ChatMessage[],
     maxTokensOverride?: number,
   ): Promise<{ result: string; totalTokens: number; promptTokens: number; completionTokens: number }> {
-    const maxTokens = maxTokensOverride || assistant.maxTokens || 1000;
+    let maxTokens = maxTokensOverride || assistant.maxTokens || 1000;
+    // ── Validate & clamp maxTokens to safe range (50 - 16000) ──────────────
+    // Một số DB cũ lưu giá trị bất hợp lệ (như 1e17) gây timeout/lỗi 400 từ API
+    if (!Number.isFinite(maxTokens) || maxTokens < 50 || maxTokens > 16000) {
+      Logger.warn(`[AIAssistant] Invalid maxTokens=${maxTokens}, clamping to 1000`);
+      maxTokens = 1000;
+    }
+    maxTokens = Math.floor(maxTokens);
     const temperature = assistant.temperature ?? 0.7;
 
     // Debug: log request info
@@ -388,23 +431,31 @@ VÍ DỤ ĐẦU RA ĐÚNG:
         completionTokens = res.data.usage?.output_tokens || 0;
         totalTokens = promptTokens + completionTokens;
       } else {
-        const apiUrl = getOpenAICompatibleUrl(assistant.platform);
+        const apiUrl = getOpenAICompatibleUrl(assistant.platform, assistant.customEndpoint);
         Logger.info(`[AIAssistant] OpenAI-compat URL: ${apiUrl}, model: ${assistant.model}`);
         const tokenParam = assistant.platform === 'openai'
           ? { max_completion_tokens: maxTokens }
           : { max_tokens: maxTokens };
+        const requestBody = { model: assistant.model, messages, ...tokenParam, temperature };
+        Logger.info(`[AIAssistant] Sending request to ${apiUrl}, messages.length=${messages.length}`);
+        const startTime = Date.now();
         const res = await axios.post(
           apiUrl,
-          { model: assistant.model, messages, ...tokenParam, temperature },
+          requestBody,
           {
             headers: {
               Authorization: `Bearer ${assistant.apiKey}`,
               'Content-Type': 'application/json',
             },
-            timeout: 60000,
+            timeout: 30000,
           }
         );
+        const elapsedMs = Date.now() - startTime;
+        Logger.info(`[AIAssistant] ✅ Response received in ${elapsedMs}ms, status=${res.status}`);
+        // Debug: log response structure
+        Logger.info(`[AIAssistant] Response data preview: ${JSON.stringify(res.data).substring(0, 500)}`);
         result = res.data.choices?.[0]?.message?.content?.trim() || '';
+        Logger.info(`[AIAssistant] Result length: ${result.length}, preview: "${result.substring(0, 100)}"`);
         promptTokens = res.data.usage?.prompt_tokens || 0;
         completionTokens = res.data.usage?.completion_tokens || 0;
         totalTokens = res.data.usage?.total_tokens || (promptTokens + completionTokens);
@@ -666,6 +717,7 @@ VÍ DỤ ĐẦU RA ĐÚNG:
       isDefault: row.is_default === 1,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      customEndpoint: row.custom_endpoint || undefined,
     };
   }
 }

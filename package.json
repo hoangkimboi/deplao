@@ -33,6 +33,7 @@
     "nodemailer": "^8.0.3",
     "otplib": "^13.4.0",
     "quill": "^2.0.3",
+    "react-is": "^19.2.6",
     "react-quill-new": "^3.8.3",
     "react-zoom-pan-pinch": "^3.7.0",
     "reactflow": "^11.11.4",
@@ -100,8 +101,18 @@
     "afterPack": "./scripts/after-pack.js",
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "dir", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "resources/icons/icon.ico",
       "signAndEditExecutable": false
@@ -114,8 +125,20 @@
     },
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] },
-        { "target": "zip", "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "icon": "resources/icons/icon.icns",
       "category": "public.app-category.social-networking",
@@ -126,7 +149,10 @@
       "title": "Deplao"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "resources/icons/icon.png",
       "category": "Network"
     }

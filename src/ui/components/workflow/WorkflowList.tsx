@@ -988,7 +988,7 @@ export default function WorkflowList({ onEdit, onOpenStore }: Props) {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-6">
         {loading && (
           <div className="flex items-center justify-center py-16">
             <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
@@ -1036,14 +1036,14 @@ export default function WorkflowList({ onEdit, onOpenStore }: Props) {
         )}
 
         {/* ── Card Grid ──────────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filteredWorkflows.map(wf => {
             const isRunning = runningId === wf.id;
             const isUnsupported = normalizeWorkflowChannel(wf.channel) !== 'zalo' || workflowHasUnsupportedNodes(wf);
             const toggleBlocked = isUnsupported && !wf.enabled;
             return (
               <div key={wf.id}
-                className="group bg-gray-900 border border-gray-700/80 rounded-2xl hover:border-gray-600 transition-all hover:shadow-lg hover:shadow-black/20 flex flex-col overflow-hidden">
+                className="group min-w-0 bg-gray-900 border border-gray-700/80 rounded-2xl hover:border-gray-600 transition-all hover:shadow-lg hover:shadow-black/20 flex flex-col overflow-hidden">
                 {/* Card header */}
                 <div className="px-4 pt-4 pb-3 flex items-start gap-3">
                   {/* Status indicator */}

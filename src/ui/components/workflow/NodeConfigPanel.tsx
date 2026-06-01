@@ -861,7 +861,14 @@ const CONFIG_SCHEMA: Record<string, Field[]> = {
         { value: 'deepseek', label: '🔮 Deepseek' },
         { value: 'grok',     label: '⚡ Grok (xAI)' },
         { value: 'mistral',  label: '🌀 Mistral AI' },
+        { value: 'openai-compatible', label: '🔌 OpenAI Compatible (custom endpoint)' },
       ],
+      hideWhenKey: 'aiConfigMode', hideWhenValue: 'assistant',
+    },
+    {
+      key: 'customEndpoint', label: 'Custom API Endpoint', type: 'text',
+      placeholder: 'https://9router.vnptphutho.com/v1',
+      desc: 'Base URL của API endpoint tương thích OpenAI (chỉ áp dụng khi chọn OpenAI Compatible).',
       hideWhenKey: 'aiConfigMode', hideWhenValue: 'assistant',
     },
     {
@@ -979,7 +986,14 @@ const CONFIG_SCHEMA: Record<string, Field[]> = {
         { value: 'deepseek', label: '🔮 Deepseek' },
         { value: 'grok',     label: '⚡ Grok (xAI)' },
         { value: 'mistral',  label: '🌀 Mistral AI' },
+        { value: 'openai-compatible', label: '🔌 OpenAI Compatible (custom endpoint)' },
       ],
+      hideWhenKey: 'aiConfigMode', hideWhenValue: 'assistant',
+    },
+    {
+      key: 'customEndpoint', label: 'Custom API Endpoint', type: 'text',
+      placeholder: 'https://9router.vnptphutho.com/v1',
+      desc: 'Base URL của API endpoint tương thích OpenAI (chỉ áp dụng khi chọn OpenAI Compatible).',
       hideWhenKey: 'aiConfigMode', hideWhenValue: 'assistant',
     },
     {

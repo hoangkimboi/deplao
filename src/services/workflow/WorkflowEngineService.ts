@@ -632,8 +632,10 @@ class WorkflowEngineService {
         fromId:      msgData.uidFrom    || (msg as any).uidFrom    || data.fromId    || '',
         fromName:    data.fromName      || msgData.dName            || (msg as any).fromName || '',
         fromPhone:   data.fromPhone     || (msg as any).fromPhone   || '',
-        content,
+        content:     content || (images.length > 0 ? '[Khách hàng gửi ảnh]' : ''),
+        contentRaw:  content,
         images,
+        hasImages:   images.length > 0,
         threadId:    (msg as any).threadId || data.threadId        || msgData.idTo   || '',
         threadType,
         isGroup,
@@ -1198,6 +1200,33 @@ class WorkflowEngineService {
               } catch {}
             }
 
+            // ─── Auto-fetch history if not provided and trigger has threadId ──
+            // Đảm bảo AI luôn có ngữ cảnh hội thoại để trả lời không bị lặp lại
+            if (chatMsgs.length === 0 && ctx.trigger?.threadId && ctx.pageId) {
+              try {
+                const threadType = Number(ctx.trigger.threadType) === 1 ? 1 : 0;
+                const messages = DatabaseService.getInstance().getMessages(
+                  ctx.pageId,
+                  String(ctx.trigger.threadId),
+                  20, // last 20 messages
+                  0,
+                );
+                Logger.info(`[WorkflowEngine] Auto-fetched ${messages.length} history messages for thread ${ctx.trigger.threadId}`);
+                // Sort ascending (oldest first) for chronological context
+                messages.sort((a: any, b: any) => (a.timestamp || 0) - (b.timestamp || 0));
+                for (const m of messages) {
+                  const content = (m.content || '').trim();
+                  if (!content) continue;
+                  chatMsgs.push({
+                    role: m.is_sent === 1 ? 'assistant' : 'user',
+                    content,
+                  });
+                }
+              } catch (e: any) {
+                Logger.warn(`[WorkflowEngine] Auto-fetch history failed: ${e.message}`);
+              }
+            }
+
             chatMsgs.push({ role: 'user', content: cfg.prompt });
             const result = await AIAssistantService.getInstance().chatForWorkflow(cfg.assistantId, chatMsgs);
             return { result: result.result, totalTokens: result.totalTokens, model: 'assistant' };
@@ -1294,8 +1323,8 @@ class WorkflowEngineService {
           const totalTokens = (res.data.usage?.input_tokens || 0) + (res.data.usage?.output_tokens || 0);
           return { result, totalTokens, model };
         } else {
-          // OpenAI-compatible API (OpenAI, Deepseek, Grok/xAI, Mistral)
-          const apiUrl = this.getOpenAICompatibleUrl(platform);
+          // OpenAI-compatible API (OpenAI, Deepseek, Grok/xAI, Mistral, custom)
+          const apiUrl = this.getOpenAICompatibleUrl(platform, cfg.customEndpoint);
           const tokenParam = platform === 'openai'
             ? { max_completion_tokens: maxTokens }
             : { max_tokens: maxTokens };
@@ -1389,8 +1418,8 @@ class WorkflowEngineService {
           const category = res.data.content?.[0]?.text?.trim() || '';
           return { category, input: cfg.input };
         } else {
-          // OpenAI-compatible API (OpenAI, Deepseek, Grok/xAI, Mistral)
-          const apiUrl = this.getOpenAICompatibleUrl(platform);
+          // OpenAI-compatible API (OpenAI, Deepseek, Grok/xAI, Mistral, custom)
+          const apiUrl = this.getOpenAICompatibleUrl(platform, cfg.customEndpoint);
           const tokenParam = platform === 'openai'
             ? { max_completion_tokens: 30 }
             : { max_tokens: 30 };
@@ -1838,7 +1867,8 @@ class WorkflowEngineService {
   }
 
   private renderTemplate(template: string, ctx: ExecutionContext): string {
-    return template.replace(/\{\{[\s]*([\w$.[\]]+)[\s]*}}/g, (_, expr) => {
+    // Cho phép label tiếng Việt + dấu cách: chấp nhận mọi ký tự trừ } và whitespace ở 2 đầu
+    return template.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, expr) => {
       try {
         if (expr.startsWith('$trigger.'))   return String(ctx.trigger?.[expr.slice(9)] ?? '');
         if (expr.startsWith('$var.'))       return String(ctx.variables?.[expr.slice(5)] ?? '');
@@ -1847,16 +1877,21 @@ class WorkflowEngineService {
         if (expr === '$date.today')         return new Date().toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
         if (expr.startsWith('$node.')) {
           const rest = expr.slice(6);
-          const dotIdx = rest.indexOf('.');
-          if (dotIdx === -1) return '';
-          const nodeRef = rest.slice(0, dotIdx);
-          const field = rest.slice(dotIdx + 1);
-          // Match by nodeId or by node label
+          // Tìm field — phần sau cùng cách dấu . cuối là field path. Tên node có thể chứa dấu cách / unicode
+          // Chiến lược: thử match từ dài → ngắn để ưu tiên label dài
+          // Lấy tất cả label nodes có sẵn
+          const candidates: Array<{ key: string; data: any }> = [];
           for (const [nid, ndata] of Object.entries(ctx.nodes)) {
             const nodeDef = ctx._wfNodes?.find(n => n.id === nid);
-            const labelOrId = nodeDef?.label || nid;
-            if (nid === nodeRef || labelOrId === nodeRef) {
-              return String(this.getNestedValue(ndata.output, field) ?? '');
+            if (nid) candidates.push({ key: nid, data: ndata });
+            if (nodeDef?.label) candidates.push({ key: nodeDef.label, data: ndata });
+          }
+          // Ưu tiên match theo độ dài giảm dần
+          candidates.sort((a, b) => b.key.length - a.key.length);
+          for (const c of candidates) {
+            if (rest.startsWith(c.key + '.')) {
+              const field = rest.slice(c.key.length + 1);
+              return String(this.getNestedValue(c.data.output, field) ?? '');
             }
           }
         }
@@ -1879,7 +1914,18 @@ class WorkflowEngineService {
   }
 
   /** Get the OpenAI-compatible chat/completions URL for a given platform */
-  private getOpenAICompatibleUrl(platform: string): string {
+  private getOpenAICompatibleUrl(platform: string, customEndpoint?: string): string {
+    if (platform === 'openai-compatible' && customEndpoint) {
+      if (customEndpoint.endsWith('/chat/completions')) {
+        return customEndpoint;
+      } else if (customEndpoint.endsWith('/v1')) {
+        return `${customEndpoint}/chat/completions`;
+      } else if (customEndpoint.endsWith('/')) {
+        return `${customEndpoint}v1/chat/completions`;
+      } else {
+        return `${customEndpoint}/v1/chat/completions`;
+      }
+    }
     switch (platform) {
       case 'deepseek': return 'https://api.deepseek.com/v1/chat/completions';
       case 'grok':     return 'https://api.x.ai/v1/chat/completions';
