@@ -85,9 +85,15 @@
     "zustand": "^5.0.12"
   },
   "build": {
-    "appId": "com.Deplao.app",
+    "appId": "com.hoangkimboi.Deplao",
     "productName": "Deplao",
     "forceCodeSigning": false,
+    "publish": {
+      "provider": "github",
+      "owner": "hoangkimboi",
+      "repo": "deplao",
+      "releaseType": "release"
+    },
     "directories": {
       "output": "dist-electron-build"
     },
